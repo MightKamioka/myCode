@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local VidIQ-like Analyzer</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; background: #0d1117; color: #e6edf3; }
+      .wrap { max-width: 1000px; margin: 24px auto; padding: 16px; }
+      .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      textarea, input { width: 100%; box-sizing: border-box; margin-top: 6px; margin-bottom: 12px; padding: 10px; border-radius: 8px; border: 1px solid #30363d; background:#0d1117; color:#e6edf3; }
+      button, .button-link { background: #238636; color: #fff; border: 0; padding: 10px 14px; border-radius: 8px; cursor: pointer; text-decoration: none; display: inline-block; }
+      ul { margin: 6px 0 0 18px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .score { font-size: 2rem; font-weight: bold; }
+      .muted { color: #8b949e; }
+      .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+      .ok { color: #3fb950; }
+      .warn { color: #d29922; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>📈 Local VidIQ-like Analyzer</h1>
+      <p class="muted">Runs entirely on your machine. No cloud API required.</p>
+
+      <div class="card">
+        <h2>YouTube連携</h2>
+        <p>ブラウザでGoogleログインし、アカウントごとにチャンネルデータを分離して保存します。</p>
+        <div class="row">
+          <a href="/youtube/connect" class="button-link">YouTubeでログイン</a>
+          <form method="post" action="/youtube/sync">
+            <button type="submit">動画データを同期して保存</button>
+          </form>
+          <form method="post" action="/analytics/sync">
+            <button type="submit">Analytics / 検索語を同期</button>
+          </form>
+          <form method="post" action="/keywords/research">
+            <button type="submit">キーワード調査を実行</button>
+          </form>
+          {% if youtube_connected %}
+          <span class="ok">連携済み</span>
+          {% else %}
+          <span class="warn">未連携</span>
+          {% endif %}
+        </div>
+        {% if active_channel_title %}
+        <p class="muted">表示中チャンネル: {{ active_channel_title }} ({{ active_channel_id }})</p>
+        {% endif %}
+        {% if last_export %}
+        <p class="muted">最終エクスポート: {{ last_export }}</p>
+        {% endif %}
+        {% if last_diff_report %}
+        <p class="muted">最新差分レポート: {{ last_diff_report }}</p>
+        {% endif %}
+        {% if last_diff_summary %}
+        <p class="muted">差分サマリ - 追加: {{ last_diff_summary.added }}, 削除: {{ last_diff_summary.removed }}, 変化: {{ last_diff_summary.changed }}</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>チャンネル一覧</h2>
+        {% if channels %}
+        <ul>
+          {% for ch in channels %}
+          <li>
+            {% if ch.channel_id == active_channel_id %}<strong>[選択中]</strong> {% endif %}
+            {{ ch.channel_title }} ({{ ch.channel_id }})
+            <a href="/channel/select/{{ ch.channel_id }}" class="button-link">表示切替</a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">まだチャンネルが登録されていません。YouTubeでログインしてください。</p>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>類似チャンネル監視（UID）</h2>
+        <form method="post" action="/monitor/register">
+          <label>監視チャンネルUID</label>
+          <input name="channel_uid" placeholder="UCxxxxxxxxxxxxxxxxxxxxxx" required />
+          <button type="submit">UIDを登録</button>
+        </form>
+        <form method="post" action="/monitor/sync">
+          <button type="submit">監視チャンネルを一括同期</button>
+        </form>
+
+        {% if monitored_channels %}
+        <ul>
+          {% for m in monitored_channels %}
+          <li>
+            {{ m.channel_title }} ({{ m.channel_id }})
+            {% if m.last_diff_summary %}
+            <span class="muted"> / 追加: {{ m.last_diff_summary.added }}, 削除: {{ m.last_diff_summary.removed }}, 変化: {{ m.last_diff_summary.changed }}</span>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">監視チャンネルはまだありません。</p>
+        {% endif %}
+      </div>
+
+
+      {% if dashboard %}
+      <div class="card">
+        <h2>チャンネル概要ダッシュボード</h2>
+        <p class="muted">Scorecard: 動画数 {{ dashboard.scorecard.total_videos }}, 総再生 {{ dashboard.scorecard.total_views }}, 平均再生 {{ dashboard.scorecard.avg_views }}, 健全度 {{ dashboard.scorecard.health }}</p>
+        <p class="muted">ライブ近似: 直近変動件数 {{ dashboard.live_like.last_changed_count }} / 追加 {{ dashboard.live_like.last_added }} / 削除 {{ dashboard.live_like.last_removed }}</p>
+      </div>
+
+      <div class="card">
+        <h3>最新動画一覧</h3>
+        <ul>
+          {% for v in dashboard.latest_videos %}
+          <li>{{ v.title }} (views: {{ v.view_count }}, privacy: {{ v.privacy_status }})</li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <h3>伸びている動画</h3>
+          <ul>
+            {% for g in dashboard.growing_videos %}
+            <li>{{ g.title }} (+{{ g.view_diff }} views)</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="card">
+          <h3>失速動画</h3>
+          <ul>
+            {% for s in dashboard.slowing_videos %}
+            <li>{{ s.title }} ({{ s.view_diff }} views)</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>期間比較（views）</h3>
+        <ul>
+          <li>日次: {{ dashboard.period_compare.daily.current }} vs 前回 {{ dashboard.period_compare.daily.previous }}</li>
+          <li>週次: {{ dashboard.period_compare.weekly.current }} vs 前回 {{ dashboard.period_compare.weekly.previous }}</li>
+          <li>月次: {{ dashboard.period_compare.monthly.current }} vs 前回 {{ dashboard.period_compare.monthly.previous }}</li>
+        </ul>
+      </div>
+      {% endif %}
+
+
+      {% if channel_audit %}
+      <div class="card">
+        <h2>Channel Audit</h2>
+        <ul>
+          <li>VPH (views/hour): {{ channel_audit.vph }}</li>
+          <li>エンゲージメント率: {{ channel_audit.engagement_rate }}%</li>
+          <li>登録者増減: {{ channel_audit.subscribers_net }}</li>
+          <li>総視聴時間(分): {{ channel_audit.total_watch_minutes }}</li>
+          <li>平均視聴時間(秒): {{ channel_audit.average_view_duration }}</li>
+        </ul>
+
+        <h3>Audience Retention 上位動画</h3>
+        <ul>
+          {% for r in channel_audit.top_retention_videos %}
+          <li>{{ r[0] }} (retention: {{ r[3] }}%, views: {{ r[1] }})</li>
+          {% endfor %}
+        </ul>
+
+        <h3>上位プレイリスト</h3>
+        <ul>
+          {% for p in channel_audit.top_playlists %}
+          <li>{{ p[0] }} (views: {{ p[1] }}, watch: {{ p[2] }})</li>
+          {% endfor %}
+        </ul>
+
+        <h3>主な流入元</h3>
+        <ul>
+          {% for s in channel_audit.traffic_sources %}
+          <li>{{ s[0] }} (views: {{ s[1] }}, watch: {{ s[2] }})</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+
+      {% if keyword_research %}
+      <div class="card">
+        <h2>キーワード調査</h2>
+        <h3>Rising keywords</h3>
+        <ul>
+          {% for k in keyword_research.rising_keywords %}
+          <li>{{ k.keyword }} (trend: {{ k.trend_score }}, opp: {{ k.opportunity_score }}, fit: {{ k.target_fit }})</li>
+          {% endfor %}
+        </ul>
+
+        <h3>Top keyword opportunities</h3>
+        <ul>
+          {% for k in keyword_research.top_opportunities %}
+          <li>{{ k.keyword }} | volume {{ k.volume_score }} | competition {{ k.competition_score }} | opp {{ k.opportunity_score }}</li>
+          {% endfor %}
+        </ul>
+
+        <h3>関連キーワード提案</h3>
+        <p>{{ keyword_research.related_keywords | join(', ') }}</p>
+      </div>
+      {% endif %}
+
+
+      {% if competitor_analysis %}
+      <div class="card">
+        <h2>競合分析</h2>
+        <p class="muted">自チャンネル: views {{ competitor_analysis.own.views }}, subscribers {{ competitor_analysis.own.subscribers }}, videos {{ competitor_analysis.own.video_count }}</p>
+        <p class="muted">成長率(7/14/28日): {{ competitor_analysis.own.growth_7d }}% / {{ competitor_analysis.own.growth_14d }}% / {{ competitor_analysis.own.growth_28d }}%</p>
+        <p class="muted">平均日次再生(30日): {{ competitor_analysis.own.avg_daily_views }}</p>
+
+        <h3>競合ウォッチリスト比較</h3>
+        <ul>
+          {% for c in competitor_analysis.competitors %}
+          <li>
+            {{ c.name }} | views {{ c.views }} / subscribers {{ c.subscribers }} / videos {{ c.video_count }}
+            | 30d {{ c.compare_30d_views }}, 60d {{ c.compare_60d_views }}, 12m {{ c.compare_12m_views }}
+            | growth 7d {{ c.growth_7d }}%, 14d {{ c.growth_14d }}%, 28d {{ c.growth_28d }}%
+            | avg daily {{ c.avg_daily_views }}
+          </li>
+        {% endfor %}
+        </ul>
+
+        <h3>競合の伸びた動画</h3>
+        {% for c in competitor_analysis.competitors %}
+        <p><strong>{{ c.name }}</strong></p>
+        <ul>
+          {% for v in c.top_growing_videos %}
+          <li>{{ v.title }} (+{{ v.view_diff }} views)</li>
+          {% endfor %}
+        </ul>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+
+      <div class="card">
+        <h2>監視ルール設定（キーワード / カテゴリ / 競合）</h2>
+        <form method="post" action="/monitoring/rules">
+          <label>種別</label>
+          <input name="rule_type" placeholder="keyword / category / competitor" required />
+          <label>対象</label>
+          <input name="target" required />
+          <label>頻度</label>
+          <input name="frequency" placeholder="daily / every2 / weekly" value="daily" />
+          <label>閾値</label>
+          <input name="threshold" value="10" />
+          <button type="submit">監視ルールを追加</button>
+        </form>
+        <form method="post" action="/monitoring/scan">
+          <button type="submit">トレンド検知を今すぐ実行</button>
+        </form>
+
+        {% if monitor_rules %}
+        <ul>
+          {% for r in monitor_rules %}
+          <li>{{ r.rule_type }} / {{ r.target }} / {{ r.frequency }} / threshold {{ r.threshold }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>通知</h2>
+        {% if notifications %}
+        <ul>
+          {% for n in notifications %}
+          <li>[{{ n.type }}] {{ n.message }} (rule: {{ n.rule_id }})</li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">通知はまだありません。</p>
+        {% endif %}
+      </div>
+
+
+      <div class="card">
+        <h2>コメント調査</h2>
+        <form method="post" action="/comments/sync">
+          <button type="submit">コメントを同期（自/競合の共通ユーザーDB更新）</button>
+        </form>
+
+        <h3>共有ユーザー一覧（全チャンネル横断）</h3>
+        <ul>
+          {% for u in shared_users %}
+          <li>
+            {{ u.author_name }} ({{ u.user_id }}) comments: {{ u.comment_count }}
+            <form method="post" action="/comments/focus" style="display:inline">
+              <input type="hidden" name="user_id" value="{{ u.user_id }}" />
+              <button type="submit">このユーザーに注目</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+
+        {% if focused_user_id %}
+        <h3>注目ユーザー: {{ focused_user.author_name }} ({{ focused_user_id }})</h3>
+        <ul>
+          {% for c in focused_user.comments %}
+          <li>[{{ c.source_channel_id }}] video {{ c.video_id }} - {{ c.text }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+
+        <h3>動画コメント一覧（最新同期）</h3>
+        <ul>
+          {% for c in comments_latest %}
+          <li>
+            <strong>{{ c.author_name }}</strong> on {{ c.video_id }}: {{ c.text }}
+            <form method="post" action="/comments/reply">
+              <input type="hidden" name="parent_comment_id" value="{{ c.comment_id }}" />
+              <input name="reply_text" placeholder="返信内容" required />
+              <button type="submit">返信する</button>
+            </form>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+
+      <div class="card">
+        <h2>Sherlock調査</h2>
+        <form method="post" action="/sherlock/register">
+          <input name="username" placeholder="username" required />
+          <button type="submit">登録</button>
+        </form>
+        <form method="post" action="/sherlock/scan">
+          <input name="username" placeholder="単一ユーザーを調査" required />
+          <button type="submit">単一ユーザー調査</button>
+        </form>
+        <form method="post" action="/sherlock/scan_all">
+          <button type="submit">登録ユーザー全体を調査</button>
+        </form>
+
+        <p class="muted">登録ユーザー: {{ sherlock_users | join(', ') }}</p>
+        {% if sherlock_latest %}
+        <p>最新結果: {{ sherlock_latest.username }} found {{ sherlock_latest.found_count }}/{{ sherlock_latest.checked_count }}</p>
+        <ul>
+          {% for f in sherlock_latest.found %}
+          <li>{{ f.platform }} - {{ f.url }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+
+      <form method="post" action="/analyze" class="card">
+        <label>Video Title</label>
+        <input name="title" required value="{{ input.title if input else '' }}" />
+
+        <label>Description</label>
+        <textarea name="description" rows="4">{{ input.description if input else '' }}</textarea>
+
+        <label>Tags (comma separated)</label>
+        <input name="tags" value="{{ input.tags if input else '' }}" />
+
+        <label>Transcript / Script</label>
+        <textarea name="transcript" rows="10">{{ input.transcript if input else '' }}</textarea>
+
+        <button type="submit">Analyze</button>
+      </form>
+
+      {% if result %}
+      <div class="grid">
+        <div class="card">
+          <div class="muted">SEO Score</div>
+          <div class="score">{{ result.seo_score }}/100</div>
+
+          <h3>Suggested Tags</h3>
+          <p>{{ result.suggested_tags | join(', ') }}</p>
+
+          <h3>Keyword Density</h3>
+          <ul>
+            {% for word, pct in result.keyword_density.items() %}
+            <li>{{ word }}: {{ pct }}%</li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="card">
+          <h3>Title Suggestions</h3>
+          <ul>
+            {% for t in result.title_suggestions %}
+            <li>{{ t }}</li>
+            {% endfor %}
+          </ul>
+
+          <h3>Description Suggestion</h3>
+          <p>{{ result.description_suggestion }}</p>
+
+          <h3>Retention Risk</h3>
+          <ul>
+            {% for r in result.retention_risk_segments %}
+            <li>{{ r }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </body>
+</html>
