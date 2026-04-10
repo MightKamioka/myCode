@@ -37,6 +37,14 @@ pip install -r requirements.txt
 3. `http://127.0.0.1:8000/oauth2callback` をリダイレクトURIに追加
 4. クライアントシークレットJSONをプロジェクト直下に `client_secret.json` として配置
 
+## Windows初心者向け（.exeをクリックして起動）
+1. このフォルダで `scripts\build_windows_exe.bat` を**ダブルクリック**
+2. 画面の指示通り待つ（初回は数分かかります）
+3. 完了後に `dist\VidIQLocalLauncher.exe` を**ダブルクリック**
+4. ブラウザが自動で開いて `http://127.0.0.1:8000` に接続されます
+
+> 以後は `dist\VidIQLocalLauncher.exe` をクリックするだけでOKです。
+
 ## 起動
 ```bash
 SYNC_INTERVAL_MINUTES=60 uvicorn app.main:app --reload
