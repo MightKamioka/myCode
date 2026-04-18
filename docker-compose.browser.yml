@@ -1,0 +1,12 @@
+version: '3.8'
+services:
+  browser_container:
+    image: ghcr.io/browserless/chromium:latest
+    container_name: local-browser-container
+    ports:
+      - "3000:3000"
+    environment:
+      - TOKEN=local-token
+      - MAX_CONCURRENT_SESSIONS=2
+      - PREBOOT_CHROME=true
+    restart: unless-stopped
